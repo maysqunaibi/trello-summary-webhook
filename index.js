@@ -13,13 +13,11 @@ const {
   SUMMARY_CARD_ID_LONG,
 } = process.env;
 
-// Helper: build Trello API URLs
 const trello = (path, params = "") =>
   `https://api.trello.com/1/${path}?key=${TRELLO_API_KEY}&token=${TRELLO_TOKEN}${params}`;
 
 let cachedCustomFieldIds = {};
 
-// Helper to get and cache custom field IDs
 async function getCustomFieldIdByName(name) {
   if (cachedCustomFieldIds[name]) return cachedCustomFieldIds[name];
 
@@ -32,7 +30,6 @@ async function getCustomFieldIdByName(name) {
   return null;
 }
 
-// Helper to update a custom field on a card
 async function updateCustomField(cardId, fieldId, value) {
   await axios.put(
     `https://api.trello.com/1/card/${cardId}/customField/${fieldId}/item`,
@@ -48,6 +45,24 @@ async function updateCustomField(cardId, fieldId, value) {
   );
 }
 
+async function getListIdByName(listName) {
+  const res = await axios.get(trello(`boards/${BOARD_ID}/lists`));
+  const list = res.data.find((l) => l.name === listName);
+  return list ? list.id : null;
+}
+
+async function getCardCountInList(listId) {
+  const res = await axios.get(trello(`lists/${listId}/cards`));
+  return res.data.length;
+}
+
+async function getCustomFieldValueFromCard(cardId, fieldName) {
+  const fieldId = await getCustomFieldIdByName(fieldName);
+  const res = await axios.get(trello(`cards/${cardId}/customFieldItems`));
+  const fieldItem = res.data.find((item) => item.idCustomField === fieldId);
+  return fieldItem?.value?.text || fieldItem?.value?.number || "0";
+}
+
 app.get("/", (req, res) => {
   res.send("Trello webhook bot is running");
 });
@@ -56,16 +71,8 @@ app.head("/webhook", (req, res) => {
   res.status(200).send();
 });
 
-// Trello will POST here on card changes
 app.post("/webhook", async (req, res) => {
-  console.log(
-    "📥 Webhook received from Trello:",
-    req.body.action?.type || "unknown action"
-  );
-
   const action = req.body.action;
-
-  // ✅ Prevent loop: ignore changes from the summary card itself
   const cardId = action?.data?.card?.id;
   if (cardId === SUMMARY_CARD_ID_LONG) {
     console.log("🔁 Ignored update from summary card to avoid loop");
@@ -110,10 +117,7 @@ app.get("/update-summary", async (req, res) => {
         source: "Arcade in-stock quantity",
         summary: "Arcade games (In-stock)",
       },
-      {
-        source: "Arcade in-use quantity",
-        summary: "Arcade games (In-use)",
-      },
+      { source: "Arcade in-use quantity", summary: "Arcade games (In-use)" },
       { source: "Surepay in-use quantity", summary: "Surepay (In-use)" },
       { source: "Black box in-use quantity", summary: "Black box (In-use)" },
       {
@@ -127,7 +131,7 @@ app.get("/update-summary", async (req, res) => {
     );
     const cards = cardsRes.data;
 
-    // Resolve field IDs
+    // Get all custom field IDs
     const fieldIdMap = {};
     for (const mapping of fieldMappings) {
       fieldIdMap[mapping.source] = await getCustomFieldIdByName(mapping.source);
@@ -136,7 +140,6 @@ app.get("/update-summary", async (req, res) => {
       );
     }
 
-    // Calculate totals for each source field
     const totals = {};
     for (const mapping of fieldMappings) {
       totals[mapping.summary] = 0;
@@ -155,19 +158,65 @@ app.get("/update-summary", async (req, res) => {
       }
     }
 
-    // Update summary fields
     for (const mapping of fieldMappings) {
-      const summaryValue = totals[mapping.summary].toString();
       const fieldId = fieldIdMap[mapping.summary];
+      const summaryValue = totals[mapping.summary].toString();
       console.log(`📌 Updating "${mapping.summary}" to ${summaryValue}`);
-
-      await axios.put(
-        trello(`cards/${SUMMARY_CARD_ID}/customField/${fieldId}/item`),
-        { value: { text: summaryValue } }
-      );
+      await updateCustomField(SUMMARY_CARD_ID, fieldId, summaryValue);
     }
 
-    res.send("✅ All summary fields updated!");
+    // ➕ Add Arcade games (Onboard)
+    const onboardListName = "Inventory (onboard games)";
+    const arcadeOnboardFieldId = await getCustomFieldIdByName(
+      "Games Quantity (Onboard)"
+    );
+    const arcadeSummaryFieldId = await getCustomFieldIdByName(
+      "Arcade games (Onboard)"
+    );
+    let arcadeOnboardTotal = 0;
+
+    for (const card of cards) {
+      if (card.id === SUMMARY_CARD_ID) continue;
+      const listRes = await axios.get(trello(`lists/${card.idList}`));
+      if (listRes.data.name === onboardListName) {
+        const item = (card.customFieldItems || []).find(
+          (i) => i.idCustomField === arcadeOnboardFieldId
+        );
+        const value = item?.value?.number || item?.value?.text;
+        arcadeOnboardTotal += parseFloat(value || 0);
+      }
+    }
+
+    console.log(`🎯 Arcade games (Onboard): ${arcadeOnboardTotal}`);
+    await updateCustomField(
+      SUMMARY_CARD_ID,
+      arcadeSummaryFieldId,
+      arcadeOnboardTotal.toString()
+    );
+
+    // ➕ Add Total new location
+    const prepListName = "Prep locations/المواقع قيد التجهيز";
+    const totalLocationFieldId = await getCustomFieldIdByName(
+      "Total new location"
+    );
+    let prepCardCount = 0;
+
+    for (const card of cards) {
+      if (card.id === SUMMARY_CARD_ID) continue;
+      const listRes = await axios.get(trello(`lists/${card.idList}`));
+      if (listRes.data.name === prepListName) {
+        prepCardCount++;
+      }
+    }
+
+    console.log(`📍 Total new location: ${prepCardCount}`);
+    await updateCustomField(
+      SUMMARY_CARD_ID,
+      totalLocationFieldId,
+      prepCardCount.toString()
+    );
+
+    res.send("✅ Summary fields updated successfully!");
   } catch (err) {
     console.error("❌ Error in /update-summary:", err.response?.data || err);
     res.status(500).send("Error updating summary.");
