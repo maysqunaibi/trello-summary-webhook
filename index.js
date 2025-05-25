@@ -124,6 +124,10 @@ app.get("/update-summary", async (req, res) => {
         source: "Malahi device in-use quantity",
         summary: "Malahi device (In-use)",
       },
+      {
+        source: "Games Quantity (Onboard)",
+        summary: "Total onboard arcade games",
+      },
     ];
 
     const cardsRes = await axios.get(
@@ -131,7 +135,7 @@ app.get("/update-summary", async (req, res) => {
     );
     const cards = cardsRes.data;
 
-    // Get all custom field IDs
+    // Get custom field IDs
     const fieldIdMap = {};
     for (const mapping of fieldMappings) {
       fieldIdMap[mapping.source] = await getCustomFieldIdByName(mapping.source);
@@ -158,6 +162,7 @@ app.get("/update-summary", async (req, res) => {
       }
     }
 
+    // Update summary fields
     for (const mapping of fieldMappings) {
       const fieldId = fieldIdMap[mapping.summary];
       const summaryValue = totals[mapping.summary].toString();
@@ -165,36 +170,7 @@ app.get("/update-summary", async (req, res) => {
       await updateCustomField(SUMMARY_CARD_ID, fieldId, summaryValue);
     }
 
-    // ➕ Add Arcade games (Onboard)
-    const onboardListName = "Inventory (onboard games)";
-    const arcadeOnboardFieldId = await getCustomFieldIdByName(
-      "Games Quantity (Onboard)"
-    );
-    const arcadeSummaryFieldId = await getCustomFieldIdByName(
-      "Arcade games (Onboard)"
-    );
-    let arcadeOnboardTotal = 0;
-
-    for (const card of cards) {
-      if (card.id === SUMMARY_CARD_ID) continue;
-      const listRes = await axios.get(trello(`lists/${card.idList}`));
-      if (listRes.data.name === onboardListName) {
-        const item = (card.customFieldItems || []).find(
-          (i) => i.idCustomField === arcadeOnboardFieldId
-        );
-        const value = item?.value?.number || item?.value?.text;
-        arcadeOnboardTotal += parseFloat(value || 0);
-      }
-    }
-
-    console.log(`🎯 Arcade games (Onboard): ${arcadeOnboardTotal}`);
-    await updateCustomField(
-      SUMMARY_CARD_ID,
-      arcadeSummaryFieldId,
-      arcadeOnboardTotal.toString()
-    );
-
-    // ➕ Add Total new location
+    // ➕ Add "Total new location"
     const prepListName = "Prep locations/المواقع قيد التجهيز";
     const totalLocationFieldId = await getCustomFieldIdByName(
       "Total new location"
