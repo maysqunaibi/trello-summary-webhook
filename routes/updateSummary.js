@@ -16,37 +16,47 @@ module.exports = async function handleSummaryUpdate() {
   const fieldMappings = [
     { source: "Geidea in-stock quantity", summary: "Geidea (In-stock)" },
     { source: "Geidea in-use quantity", summary: "Geidea (In-use)" },
-
     { source: "Surepay in-stock quantity", summary: "Surepay (In-stock)" },
+    { source: "Surepay in-use quantity", summary: "Surepay (In-use)" },
     { source: "Black Box in-stock quantity", summary: "Black Box (In-stock)" },
+    { source: "Black box in-use quantity", summary: "Black box (In-use)" },
     {
       source: "Malahi Device in-stock quantity",
       summary: "Malahi Device (In-stock)",
     },
-    { source: "Arcade in-stock quantity", summary: "Arcade games (In-stock)" },
-
-    { source: "Arcade in-use quantity", summary: "Arcade games (In-use)" },
-    { source: "Surepay in-use quantity", summary: "Surepay (In-use)" },
-    { source: "Black box in-use quantity", summary: "Black box (In-use)" },
     {
       source: "Malahi device in-use quantity",
       summary: "Malahi device (In-use)",
     },
+    { source: "Arcade in-stock quantity", summary: "Arcade games (In-stock)" },
+    { source: "Arcade in-use quantity", summary: "Arcade games (In-use)" },
+    {
+      source: "Games Quantity (Onboard)",
+      summary: "Total onboard arcade games",
+    }, // <-- new line
   ];
 
-  const cardsRes = await axios.get(
-    `https://api.trello.com/1/boards/${BOARD_ID}/cards?customFieldItems=true&key=${TRELLO_API_KEY}&token=${TRELLO_TOKEN}`
-  );
+  // Fetch all cards and lists
+  const [cardsRes, listsRes] = await Promise.all([
+    axios.get(
+      `https://api.trello.com/1/boards/${BOARD_ID}/cards?customFieldItems=true&key=${TRELLO_API_KEY}&token=${TRELLO_TOKEN}`
+    ),
+    axios.get(
+      `https://api.trello.com/1/boards/${BOARD_ID}/lists?key=${TRELLO_API_KEY}&token=${TRELLO_TOKEN}`
+    ),
+  ]);
+
   const cards = cardsRes.data;
+  const lists = listsRes.data;
+  const listIdMap = Object.fromEntries(lists.map((l) => [l.name, l.id]));
 
-  const listsRes = await axios.get(
-    `https://api.trello.com/1/boards/${BOARD_ID}/lists?key=${TRELLO_API_KEY}&token=${TRELLO_TOKEN}`
-  );
-  const listIdToName = {};
-  for (const list of listsRes.data) {
-    listIdToName[list.id] = list.name;
-  }
+  const allowedLists = {
+    "in-stock quantity": listIdMap["Inventory (In-stock)"],
+    "in-use quantity": listIdMap["In-operation"],
+    "Games Quantity (Onboard)": listIdMap["Inventory (onboard games)"],
+  };
 
+  // Fetch all custom field IDs
   const fieldIdMap = {};
   for (const mapping of fieldMappings) {
     fieldIdMap[mapping.source] = await getCustomFieldIdByName(mapping.source);
@@ -59,64 +69,62 @@ module.exports = async function handleSummaryUpdate() {
   }
 
   for (const card of cards) {
-    if (card.id === SUMMARY_CARD_ID_LONG) {
+    const isSummaryCard =
+      card.id === SUMMARY_CARD_ID || card.id === SUMMARY_CARD_ID_LONG;
+    if (isSummaryCard) {
       console.log(`🔁 Skipping summary card "${card.name}"`);
       continue;
     }
 
-    const listName = listIdToName[card.idList] || "Unknown";
-
     for (const item of card.customFieldItems || []) {
       for (const mapping of fieldMappings) {
-        if (item.idCustomField === fieldIdMap[mapping.source]) {
-          const fieldName = mapping.source;
-          const value = item.value?.number || item.value?.text;
-          const numValue = parseFloat(value || 0);
+        const isMatch = item.idCustomField === fieldIdMap[mapping.source];
+        if (!isMatch) continue;
 
-          const lowerField = fieldName.toLowerCase();
-          const shouldInclude =
-            (lowerField.includes("in-use quantity") &&
-              listName === "In-operation") ||
-            (lowerField.includes("in-stock quantity") &&
-              listName === "Inventory (In-stock)");
+        const expectedListId = Object.entries(allowedLists).find(([key]) =>
+          mapping.source.includes(key)
+        )?.[1];
 
-          if (shouldInclude) {
-            totals[mapping.summary] += numValue;
-            console.log(
-              `✅ Counted ${value} from "${card.name}" in "${listName}" for "${fieldName}"`
-            );
-          } else {
-            console.log(
-              `⛔ Skipped "${fieldName}" in card "${card.name}" from list "${listName}"`
-            );
-          }
+        if (!expectedListId || card.idList !== expectedListId) {
+          console.log(
+            `⛔ Skipped "${mapping.source}" from wrong list: ${card.name}`
+          );
+          continue;
         }
+
+        const value = item.value?.number || item.value?.text;
+        const parsed = parseFloat(value || 0);
+        totals[mapping.summary] += parsed;
+        console.log(
+          `✅ Added ${parsed} to "${mapping.summary}" from "${card.name}"`
+        );
       }
     }
   }
 
   for (const mapping of fieldMappings) {
-    const summaryValue = totals[mapping.summary].toString();
-    console.log(`📌 Updating summary "${mapping.summary}" to ${summaryValue}`);
+    const value = totals[mapping.summary].toString();
     await updateCustomField(
       SUMMARY_CARD_ID,
       fieldIdMap[mapping.summary],
-      summaryValue
+      value
     );
+    console.log(`📌 Updated summary field "${mapping.summary}" to ${value}`);
   }
 
-  // Prep location summary
+  // Count prep locations
   const prepListName = "Prep locations/المواقع قيد التجهيز";
+  const prepListId = listIdMap[prepListName];
   const prepFieldId = await getCustomFieldIdByName("Total new location");
+
   const prepCardCount = cards.filter(
-    (card) =>
-      card.id !== SUMMARY_CARD_ID && listIdToName[card.idList] === prepListName
+    (c) => c.idList === prepListId && c.id !== SUMMARY_CARD_ID
   ).length;
 
-  console.log(`📍 Total new location cards: ${prepCardCount}`);
   await updateCustomField(
     SUMMARY_CARD_ID,
     prepFieldId,
     prepCardCount.toString()
   );
+  console.log(`📌 Updated "Total new location" to ${prepCardCount}`);
 };
