@@ -22,19 +22,27 @@ module.exports = async function handleSummaryUpdate() {
     { source: "Black Box in-stock quantity", summary: "Black Box (In-stock)" },
     { source: "Black box in-use quantity", summary: "Black box (In-use)" },
     {
-      source: "Malahi Device in-stock quantity",
-      summary: "Malahi Device (In-stock)",
+      source: "R-pay in-stock quantity",
+      summary: "R-pay (In-stock)",
     },
     {
-      source: "Malahi device in-use quantity",
-      summary: "Malahi device (In-use)",
+      source: "R-pay in-use quantity",
+      summary: "R-pay (In-use)",
     },
     { source: "Arcade in-stock quantity", summary: "Arcade games (In-stock)" },
     { source: "Arcade in-use quantity", summary: "Arcade games (In-use)" },
     {
       source: "Games Quantity (Onboard)",
       summary: "Total onboard arcade games",
-    }, // <-- new line
+    },
+    {
+      source: "Games Quantity (Targeted Locations)",
+      summary: "Games Quantity(Targeted Locations)",
+    },
+      {
+      source: "Device Quantity (Targeted Locations)",
+      summary: "Device Quantity(Targeted Locations)",
+    },
   ];
 
   // Fetch all cards and lists
