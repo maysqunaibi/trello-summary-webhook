@@ -39,7 +39,7 @@ module.exports = async function handleSummaryUpdate() {
       source: "Games Quantity (Targeted Locations)",
       summary: "Games Quantity(Targeted Locations)",
     },
-      {
+    {
       source: "Device Quantity (Targeted Locations)",
       summary: "Device Quantity(Targeted Locations)",
     },
@@ -63,6 +63,7 @@ module.exports = async function handleSummaryUpdate() {
     "in-stock quantity": listIdMap["Inventory (In-stock)"],
     "in-use quantity": listIdMap["In-operation"],
     "Games Quantity (Onboard)": listIdMap["Inventory (onboard games)"],
+    "(Targeted Locations)": listIdMap["Targeted Locations/المواقع المستهدفة"],
   };
 
   // Fetch all custom field IDs
